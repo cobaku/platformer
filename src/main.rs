@@ -4,7 +4,7 @@ use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::render::WindowCanvas;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 enum Block {
     EMPTY,
     WALL { color: u32 },
@@ -28,25 +28,59 @@ impl Playground {
         }
     }
 
-    fn block_at(self: &Self, x: usize, y: usize, scale: (u32, u32)) -> &Block {
-        let dx = x / scale.0 as usize;
-        let dy = y / scale.1 as usize;
-        &self.schema[dx * self.width + dy]
+    fn read() -> Self {
+        let contents = std::fs::read_to_string("map.txt")
+            .expect("Unable to read map");
+        let mut width = 0;
+        let mut index = 0;
+        let mut schema = Vec::new();
+        let mut count_width = true;
+        for code in contents.chars() {
+            let block = match code {
+                '_' => { Some(Block::EMPTY) }
+                '%' => { Some(Block::FLOOR { color: compose_color(255, 0, 0) }) }
+                '|' => { Some(Block::WALL { color: compose_color(0, 0, 255) }) }
+                '\n' => {
+                    if count_width {
+                        width = index;
+                        count_width = false;
+                    }
+                    None
+                }
+                _ => { None }
+            };
+            index = index + 1;
+            if block.is_some() {
+                schema.push(block.unwrap());
+            }
+        }
+        Playground {
+            schema,
+            height: (index / width),
+            width,
+        }
+    }
+
+    fn tick(self: &Self) {}
+
+    fn block_at(self: &Self, x: usize, y: usize) -> &Block {
+        &self.schema[y * self.width + x]
     }
 
     fn scale_factor(self: &Self, size: (u32, u32)) -> (u32, u32) {
-        let dh = size.0 / self.height as u32;
-        let dw = size.1 / self.width as u32;
+        let dh = size.0 / self.width as u32;
+        let dw = size.1 / self.height as u32;
         (dh, dw)
     }
 }
 
 fn render(canvas: &mut WindowCanvas, playground: &Playground) {
-    let canvas_size = canvas.output_size().expect("Unable to extract canvas size");
+    let canvas_size = canvas.output_size()
+        .expect("Unable to extract canvas size");
     let scale = playground.scale_factor(canvas_size);
     for y in 0..playground.height {
         for x in 0..playground.width {
-            let block = playground.block_at(x, y, scale);
+            let block = playground.block_at(x, y);
             let color = match block {
                 Block::WALL { color } => {
                     Some(color)
@@ -55,15 +89,22 @@ fn render(canvas: &mut WindowCanvas, playground: &Playground) {
                     Some(color)
                 }
                 Block::EMPTY => { None }
-                _ => { None }
             };
-            color.map(|c| {
-                let split = split_rgb(*c);
-                let sdl_color = Color::from(split);
-                canvas.set_draw_color(sdl_color);
-                let rect = Rect::new((x as u32 * scale.0) as i32, (y as u32 * scale.1) as i32, scale.0, scale.1);
-                canvas.draw_rect(rect);
-            });
+            if color.is_none() {
+                continue;
+            }
+            let actual_color = color.unwrap();
+            let split = split_rgb(*actual_color);
+            let sdl_color = Color::from(split);
+            canvas.set_draw_color(sdl_color);
+            let rect = Rect::new(
+                (x as u32 * scale.0) as i32,
+                (y as u32 * scale.1) as i32,
+                scale.0,
+                scale.1,
+            );
+            canvas.fill_rect(rect).unwrap();
+            canvas.draw_rect(rect).unwrap();
         }
     }
 }
@@ -89,7 +130,11 @@ fn main() {
         .expect("Unable to init SDL");
     let video = sdl_context.video()
         .expect("Unable to init SDL video subsystem");
-    let window = video.window(&"Sample text", WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32)
+    let window = video.window(
+        &"Dummy platformer on Rust",
+        WINDOW_WIDTH as u32,
+        WINDOW_HEIGHT as u32,
+    )
         .position_centered()
         .build()
         .expect("Unable to create window for application");
@@ -105,7 +150,7 @@ fn main() {
         .build()
         .expect("Unable to create canvas");
 
-    let mut playground = Playground::new(20, 20);
+    let playground = Playground::read();
 
     while running {
         for event in events.poll_iter() {
@@ -115,12 +160,10 @@ fn main() {
                 _ => {}
             }
         }
-
+        playground.tick();
         canvas.set_draw_color(Color::BLACK);
         canvas.clear();
-
         render(&mut canvas, &playground);
-
         canvas.present();
         std::thread::sleep(std::time::Duration::from_millis(1000 / 60));
     }
