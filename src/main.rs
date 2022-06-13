@@ -66,6 +66,15 @@ impl Game {
         (player, playground)
     }
 
+    fn handle_key_press(self: &mut Self, keycode: Keycode) {
+        match keycode {
+            Keycode::A => { self.player.position_x = self.player.position_x + 1 }
+            Keycode::D => { self.player.position_x = self.player.position_x - 1 }
+            Keycode::Space => { self.player.position_y = self.player.position_y + 1 }
+            _ => {}
+        }
+    }
+
     fn tick(self: &Self) {}
 
     fn render(self: &Self, canvas: &mut WindowCanvas) {
@@ -81,15 +90,9 @@ impl Game {
             for x in 0..playground.width {
                 let block = playground.block_at(x, y);
                 let color = match block {
-                    Block::WALL { color } => {
-                        Some(color)
-                    }
-                    Block::FLOOR { color } => {
-                        Some(color)
-                    }
-                    Block::PLAYER { .. } => {
-                        None
-                    }
+                    Block::WALL { color } => { Some(color) }
+                    Block::FLOOR { color } => { Some(color) }
+                    Block::PLAYER { .. } => { None }
                     Block::EMPTY => { None }
                 };
                 if color.is_none() {
@@ -196,13 +199,18 @@ fn main() {
         .build()
         .expect("Unable to create canvas");
 
-    let game = Game::new();
+    let mut game = Game::new();
 
     while running {
         for event in events.poll_iter() {
             match event {
                 Event::Quit { .. } => { running = false }
                 Event::KeyDown { keycode: Some(Keycode::Escape), .. } => { running = false }
+                Event::KeyDown { keycode, .. } => {
+                    if keycode.is_some() {
+                        game.handle_key_press(keycode.unwrap());
+                    }
+                }
                 _ => {}
             }
         }
