@@ -7,39 +7,42 @@ use sdl2::render::WindowCanvas;
 #[derive(Copy, Clone, Debug)]
 enum Block {
     EMPTY,
+    PLAYER { color: u32 },
     WALL { color: u32 },
     FLOOR { color: u32 },
 }
 
-struct Playground {
-    schema: Vec<Block>,
-    height: usize,
-    width: usize,
+struct Game {
+    player: Player,
+    playground: Playground,
 }
 
-impl Playground {
-    fn new(height: usize, width: usize) -> Self {
-        let mut schema = Vec::new();
-        schema.resize(height * width, Block::EMPTY);
-        Playground {
-            schema,
-            height,
-            width,
+impl Game {
+    fn new() -> Self {
+        let definition = Game::read_definition();
+        Game {
+            player: definition.0,
+            playground: definition.1,
         }
     }
 
-    fn read() -> Self {
+    fn read_definition() -> (Player, Playground) {
         let contents = std::fs::read_to_string("map.txt")
             .expect("Unable to read map");
         let mut width = 0;
         let mut index = 0;
         let mut schema = Vec::new();
         let mut count_width = true;
+        let mut player_index = 0;
         for code in contents.chars() {
             let block = match code {
                 '_' => { Some(Block::EMPTY) }
                 '%' => { Some(Block::FLOOR { color: compose_color(255, 0, 0) }) }
                 '|' => { Some(Block::WALL { color: compose_color(0, 0, 255) }) }
+                '@' => {
+                    player_index = index;
+                    Some(Block::FLOOR { color: compose_color(255, 0, 0) })
+                }
                 '\n' => {
                     if count_width {
                         width = index;
@@ -54,14 +57,92 @@ impl Playground {
                 schema.push(block.unwrap());
             }
         }
-        Playground {
-            schema,
-            height: (index / width),
-            width,
-        }
+        let playground = Playground::new(schema, index / width, width);
+
+        let player = Player {
+            position_y: player_index / playground.height,
+            position_x: player_index / width,
+        };
+        (player, playground)
     }
 
     fn tick(self: &Self) {}
+
+    fn render(self: &Self, canvas: &mut WindowCanvas) {
+        let canvas_size = canvas.output_size()
+            .expect("Unable to extract canvas size");
+        let scale = self.playground.scale_factor(canvas_size);
+        self.render_playground(&self.playground, canvas, scale);
+        self.render_player(&self.player, canvas, scale);
+    }
+
+    fn render_playground(self: &Self, playground: &Playground, canvas: &mut WindowCanvas, scale: (u32, u32)) {
+        for y in 0..playground.height {
+            for x in 0..playground.width {
+                let block = playground.block_at(x, y);
+                let color = match block {
+                    Block::WALL { color } => {
+                        Some(color)
+                    }
+                    Block::FLOOR { color } => {
+                        Some(color)
+                    }
+                    Block::PLAYER { .. } => {
+                        None
+                    }
+                    Block::EMPTY => { None }
+                };
+                if color.is_none() {
+                    continue;
+                }
+                let actual_color = color.unwrap();
+                let split = split_rgb(*actual_color);
+                let sdl_color = Color::from(split);
+                canvas.set_draw_color(sdl_color);
+                let rect = Rect::new(
+                    (x as u32 * scale.0) as i32,
+                    (y as u32 * scale.1) as i32,
+                    scale.0,
+                    scale.1,
+                );
+                canvas.fill_rect(rect).unwrap();
+                canvas.draw_rect(rect).unwrap();
+            }
+        }
+    }
+
+    fn render_player(self: &Self, player: &Player, canvas: &mut WindowCanvas, scale: (u32, u32)) {
+        canvas.set_draw_color(Color::GREEN);
+        let rect = Rect::new(
+            (player.position_x as u32 * scale.0) as i32,
+            (player.position_y as u32 * scale.1 + scale.1) as i32,
+            scale.0,
+            scale.1,
+        );
+        canvas.fill_rect(rect).unwrap();
+        canvas.draw_rect(rect).unwrap();
+    }
+}
+
+struct Player {
+    position_x: usize,
+    position_y: usize,
+}
+
+struct Playground {
+    schema: Vec<Block>,
+    height: usize,
+    width: usize,
+}
+
+impl Playground {
+    fn new(schema: Vec<Block>, height: usize, width: usize) -> Self {
+        Playground {
+            schema,
+            height,
+            width,
+        }
+    }
 
     fn block_at(self: &Self, x: usize, y: usize) -> &Block {
         &self.schema[y * self.width + x]
@@ -71,41 +152,6 @@ impl Playground {
         let dh = size.0 / self.width as u32;
         let dw = size.1 / self.height as u32;
         (dh, dw)
-    }
-}
-
-fn render(canvas: &mut WindowCanvas, playground: &Playground) {
-    let canvas_size = canvas.output_size()
-        .expect("Unable to extract canvas size");
-    let scale = playground.scale_factor(canvas_size);
-    for y in 0..playground.height {
-        for x in 0..playground.width {
-            let block = playground.block_at(x, y);
-            let color = match block {
-                Block::WALL { color } => {
-                    Some(color)
-                }
-                Block::FLOOR { color } => {
-                    Some(color)
-                }
-                Block::EMPTY => { None }
-            };
-            if color.is_none() {
-                continue;
-            }
-            let actual_color = color.unwrap();
-            let split = split_rgb(*actual_color);
-            let sdl_color = Color::from(split);
-            canvas.set_draw_color(sdl_color);
-            let rect = Rect::new(
-                (x as u32 * scale.0) as i32,
-                (y as u32 * scale.1) as i32,
-                scale.0,
-                scale.1,
-            );
-            canvas.fill_rect(rect).unwrap();
-            canvas.draw_rect(rect).unwrap();
-        }
     }
 }
 
@@ -150,7 +196,7 @@ fn main() {
         .build()
         .expect("Unable to create canvas");
 
-    let playground = Playground::read();
+    let game = Game::new();
 
     while running {
         for event in events.poll_iter() {
@@ -160,10 +206,10 @@ fn main() {
                 _ => {}
             }
         }
-        playground.tick();
+        game.tick();
         canvas.set_draw_color(Color::BLACK);
         canvas.clear();
-        render(&mut canvas, &playground);
+        game.render(&mut canvas);
         canvas.present();
         std::thread::sleep(std::time::Duration::from_millis(1000 / 60));
     }
